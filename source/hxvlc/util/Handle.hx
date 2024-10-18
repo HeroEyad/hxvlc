@@ -3,6 +3,9 @@ package hxvlc.util;
 #if (!cpp && !(desktop || mobile))
 #error 'The current target platform isn\'t supported by hxvlc.'
 #end
+#if hxCodec
+#error "hxvlc and hxCodec cannot be used in the same project."
+#end
 import haxe.io.Path;
 import haxe.Exception;
 import haxe.Int64;
@@ -23,6 +26,7 @@ using StringTools;
 /**
  * This class manages the global instance of LibVLC, providing methods for initialization, disposal, and retrieving version information.
  */
+@:nullSafety
 #if android
 @:headerInclude('android/log.h')
 #end
@@ -61,7 +65,7 @@ class Handle
 	/**
 	 * The instance of LibVLC that is used globally.
 	 */
-	public static var instance(default, null):cpp.RawPointer<LibVLC_Instance_T>;
+	public static var instance(default, null):Null<cpp.RawPointer<LibVLC_Instance_T>>;
 
 	/**
 	 * Indicates whether the instance is still loading.
@@ -106,7 +110,7 @@ class Handle
 	private static final instanceMutex:Mutex = new Mutex();
 
 	@:noCompletion
-	private static var logFile:cpp.FILE;
+	private static var logFile:Null<cpp.FILE>;
 
 	/**
 	 * Initializes the LibVLC instance if it isn't already.
@@ -193,6 +197,7 @@ class Handle
 
 				mkDirs(Path.directory(sharePath));
 
+				@:nullSafety(Off)
 				for (file in library.list(null))
 				{
 					final savePath:String = Path.join([sharePath, file.substring(file.indexOf('/', 0) + 1, file.length)]);
@@ -232,31 +237,43 @@ class Handle
 			#end
 
 			final args:cpp.VectorConstCharStar = cpp.VectorConstCharStar.alloc();
+
 			#if windows
-			args.push_back("--aout=waveout");
+			args.push_back("--aout=directsound");
 			#end
+
 			#if (android || ios || macos)
 			args.push_back("--audio-resampler=soxr");
 			#end
+
 			args.push_back("--drop-late-frames");
 			args.push_back("--ignore-config");
 			args.push_back("--intf=none");
 			args.push_back("--http-reconnect");
 			args.push_back("--no-interact");
+			args.push_back("--no-keyboard-events");
+			args.push_back("--no-mouse-events");
+
 			#if HXVLC_NO_SHARE_DIRECTORY
 			args.push_back("--no-lua");
 			#end
+
 			args.push_back("--no-snapshot-preview");
 			args.push_back("--no-spu");
 			args.push_back("--no-sub-autodetect-file");
 			args.push_back("--no-video-title-show");
 			args.push_back("--no-volume-save");
 			args.push_back("--no-xlib");
+
 			#if (windows || macos)
-			args.push_back(!resetCache
-				&& FileSystem.exists(Path.join([pluginPath, 'plugins.dat'])) ? "--no-plugins-scan" : "--reset-plugins-cache");
+			if (resetCache == false && FileSystem.exists(Path.join([pluginPath, 'plugins.dat'])))
+				args.push_back("--no-plugins-scan");
+			else
+				args.push_back("--reset-plugins-cache");
 			#end
+
 			args.push_back("--text-renderer=none");
+
 			#if HXVLC_VERBOSE
 			args.push_back("--verbose=" + Define.getInt('HXVLC_VERBOSE', 0));
 			#elseif (!HXVLC_LOGGING || !HXVLC_FILE_LOGGING)
@@ -281,7 +298,7 @@ class Handle
 				instanceMutex.release();
 
 				#if (windows || macos)
-				if (!resetCache)
+				if (resetCache == false)
 				{
 					Log.warn('Failed to initialize the LibVLC instance, resetting plugins\'s cache');
 
@@ -310,12 +327,12 @@ class Handle
 				{
 					Log.warn('Failed to open log file for writing.');
 
-					LibVLC.log_set(instance, untyped __cpp__('instance_logging'), null);
+					LibVLC.log_set(instance, untyped __cpp__('instance_logging'), untyped NULL);
 				}
 				else
 					LibVLC.log_set_file(instance, logFile);
 				#elseif HXVLC_LOGGING
-				LibVLC.log_set(instance, untyped __cpp__('instance_logging'), null);
+				LibVLC.log_set(instance, untyped __cpp__('instance_logging'), untyped NULL);
 				#end
 			}
 		}

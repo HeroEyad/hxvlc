@@ -2,10 +2,12 @@ package hxvlc.flixel;
 
 #if flixel
 import flixel.graphics.FlxGraphic;
+import flixel.math.FlxMath;
 import flixel.util.FlxColor;
 import flixel.FlxG;
 import flixel.FlxSprite;
 import haxe.io.Bytes;
+import haxe.io.Path;
 import hxvlc.externs.Types;
 import hxvlc.util.macros.Define;
 import hxvlc.util.Location;
@@ -39,7 +41,8 @@ using StringTools;
  * 	FlxTimer.wait(0.001, () -> video.play());
  * ```
  */
-class FlxVideoSprite extends FlxSprite implements IFlxVideoSprite
+@:nullSafety
+class FlxVideoSprite extends FlxSprite
 {
 	/**
 	 * Indicates whether the video should automatically pause when focus is lost.
@@ -58,7 +61,7 @@ class FlxVideoSprite extends FlxSprite implements IFlxVideoSprite
 	/**
 	 * The video bitmap object.
 	 */
-	public var bitmap(default, null):Video;
+	public var bitmap(default, null):Null<Video>;
 
 	/**
 	 * Creates a `FlxVideoSprite` at a specified position.
@@ -70,18 +73,19 @@ class FlxVideoSprite extends FlxSprite implements IFlxVideoSprite
 	{
 		super(x, y);
 
-		makeGraphic(1, 1, FlxColor.TRANSPARENT);
-
 		bitmap = new Video(antialiasing);
 		bitmap.forceRendering = true;
 		bitmap.onOpening.add(function():Void
 		{
-			bitmap.role = LibVLC_Role_Game;
+			if (bitmap != null)
+			{
+				bitmap.role = LibVLC_Role_Game;
 
-			#if FLX_SOUND_SYSTEM
-			if (bitmap != null && autoVolumeHandle)
-				bitmap.volume = Math.floor((FlxG.sound.muted ? 0 : 1) * FlxG.sound.volume * Define.getFloat('HXVLC_FLIXEL_VOLUME_MULTIPLIER', 100));
-			#end
+				#if FLX_SOUND_SYSTEM
+				if (autoVolumeHandle)
+					bitmap.volume = Math.floor(FlxMath.bound(getCalculatedVolume(), 0, 1) * Define.getFloat('HXVLC_FLIXEL_VOLUME_MULTIPLIER', 100));
+				#end
+			}
 		});
 		bitmap.onFormatSetup.add(function():Void
 		{
@@ -90,6 +94,8 @@ class FlxVideoSprite extends FlxSprite implements IFlxVideoSprite
 		});
 		bitmap.visible = false;
 		FlxG.game.addChild(bitmap);
+
+		makeGraphic(1, 1, FlxColor.TRANSPARENT);
 	}
 
 	/**
@@ -121,10 +127,36 @@ class FlxVideoSprite extends FlxSprite implements IFlxVideoSprite
 			{
 				final absolutePath:String = FileSystem.absolutePath(location);
 
-				if (Assets.exists(location))
-					return bitmap.load(FileSystem.absolutePath(Assets.getPath(location)), options);
-				else if (FileSystem.exists(absolutePath))
+				if (FileSystem.exists(absolutePath))
 					return bitmap.load(absolutePath, options);
+				else if (Assets.exists(location))
+				{
+					final assetPath:String = Assets.getPath(location);
+
+					if (assetPath != null)
+					{
+						if (FileSystem.exists(assetPath) && Path.isAbsolute(assetPath))
+							return bitmap.load(assetPath, options);
+						else if (!Path.isAbsolute(assetPath))
+						{
+							try
+							{
+								final assetBytes:Bytes = Assets.getBytes(location);
+
+								if (assetBytes != null)
+									return bitmap.load(assetBytes, options);
+							}
+							catch (e:Dynamic)
+							{
+								FlxG.log.error('Error loading asset bytes from location "$location": $e');
+
+								return false;
+							}
+						}
+					}
+
+					return false;
+				}
 				else
 				{
 					FlxG.log.warn('Unable to find the video file at location "$location".');
@@ -216,6 +248,20 @@ class FlxVideoSprite extends FlxSprite implements IFlxVideoSprite
 			bitmap.togglePaused();
 	}
 
+	#if FLX_SOUND_SYSTEM
+	/**
+	 * Calculates and returns the current volume based on Flixel's sound settings by default.
+	 *
+	 * The volume is automatically clamped between `0` and `1` by the calling code. If the sound is muted, the volume is `0`.
+	 *
+	 * @return The calculated volume.
+	 */
+	public dynamic function getCalculatedVolume():Float
+	{
+		return (FlxG.sound.muted ? 0 : 1) * FlxG.sound.volume;
+	}
+	#end
+
 	public override function destroy():Void
 	{
 		if (FlxG.signals.focusGained.has(resume))
@@ -256,7 +302,7 @@ class FlxVideoSprite extends FlxSprite implements IFlxVideoSprite
 	{
 		#if FLX_SOUND_SYSTEM
 		if (bitmap != null && autoVolumeHandle)
-			bitmap.volume = Math.floor((FlxG.sound.muted ? 0 : 1) * FlxG.sound.volume * Define.getFloat('HXVLC_FLIXEL_VOLUME_MULTIPLIER', 100));
+			bitmap.volume = Math.floor(FlxMath.bound(getCalculatedVolume(), 0, 1) * Define.getFloat('HXVLC_FLIXEL_VOLUME_MULTIPLIER', 100));
 		#end
 
 		super.update(elapsed);
@@ -267,89 +313,5 @@ class FlxVideoSprite extends FlxSprite implements IFlxVideoSprite
 	{
 		return antialiasing = (bitmap == null ? value : (bitmap.smoothing = value));
 	}
-}
-
-/**
- * Interface representing a video sprite object in Flixel.
- */
-interface IFlxVideoSprite
-{
-	/**
-	 * Indicates whether the video should automatically pause when focus is lost.
-	 *
-	 * Must be set before loading a video.
-	 */
-	public var autoPause:Bool;
-
-	#if FLX_SOUND_SYSTEM
-	/**
-	 * Determines if Flixel automatically adjusts the volume based on the Flixel sound system's current volume.
-	 */
-	public var autoVolumeHandle:Bool;
-	#end
-
-	/**
-	 * The video bitmap object.
-	 */
-	public var bitmap(default, null):Video;
-
-	/**
-	 * Loads a video from a specified location.
-	 *
-	 * @param location The path, URL, file descriptor ID, or bitstream input of the media.
-	 * @param options Additional options for LibVLC Media.
-	 * @return `true` if the video loads successfully, `false` otherwise.
-	 */
-	public function load(location:Location, ?options:Array<String>):Bool;
-
-	/**
-	 * Loads a media subitem from the current media's subitems list at the specified index.
-	 *
-	 * @param index The index of the subitem to load.
-	 * @param options Additional options to configure the loaded subitem.
-	 * @return `true` if the subitem was loaded successfully, `false` otherwise.
-	 */
-	public function loadFromSubItem(index:Int, ?options:Array<String>):Bool;
-
-	/**
-	 * Parses the current media item with the specified options.
-	 *
-	 * @param parse_flag The parsing option.
-	 * @param timeout The timeout duration in milliseconds.
-	 * @return `true` if parsing succeeds, `false` otherwise.
-	 */
-	public function parseWithOptions(parse_flag:Int, timeout:Int):Bool;
-
-	/**
-	 * Stops the parsing of the current media item.
-	 */
-	public function parseStop():Void;
-
-	/**
-	 * Starts video playback.
-	 *
-	 * @return `true` if playback started successfully, `false` otherwise.
-	 */
-	public function play():Bool;
-
-	/**
-	 * Stops video playback.
-	 */
-	public function stop():Void;
-
-	/**
-	 * Pauses video playback.
-	 */
-	public function pause():Void;
-
-	/**
-	 * Resumes playback of a paused video.
-	 */
-	public function resume():Void;
-
-	/**
-	 * Toggles between play and pause states of the video.
-	 */
-	public function togglePaused():Void;
 }
 #end

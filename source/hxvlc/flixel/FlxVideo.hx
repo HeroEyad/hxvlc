@@ -1,9 +1,11 @@
 package hxvlc.flixel;
 
 #if flixel
+import flixel.math.FlxMath;
 import flixel.util.FlxAxes;
 import flixel.FlxG;
 import haxe.io.Bytes;
+import haxe.io.Path;
 import hxvlc.externs.Types;
 import hxvlc.util.macros.Define;
 import hxvlc.util.Location;
@@ -30,6 +32,7 @@ using StringTools;
  * 	FlxTimer.wait(0.001, () -> video.play());
  * ```
  */
+@:nullSafety
 class FlxVideo extends Video
 {
 	/**
@@ -68,10 +71,24 @@ class FlxVideo extends Video
 
 			#if FLX_SOUND_SYSTEM
 			if (autoVolumeHandle)
-				volume = Math.floor((FlxG.sound.muted ? 0 : 1) * FlxG.sound.volume * Define.getFloat('HXVLC_FLIXEL_VOLUME_MULTIPLIER', 100));
+				volume = Math.floor(FlxMath.bound(getCalculatedVolume(), 0, 1) * Define.getFloat('HXVLC_FLIXEL_VOLUME_MULTIPLIER', 100));
 			#end
 		});
 	}
+
+	#if FLX_SOUND_SYSTEM
+	/**
+	 * Calculates and returns the current volume based on Flixel's sound settings by default.
+	 *
+	 * The volume is automatically clamped between `0` and `1` by the calling code. If the sound is muted, the volume is `0`.
+	 *
+	 * @return The calculated volume.
+	 */
+	public dynamic function getCalculatedVolume():Float
+	{
+		return (FlxG.sound.muted ? 0 : 1) * FlxG.sound.volume;
+	}
+	#end
 
 	/**
 	 * Loads a video.
@@ -99,10 +116,36 @@ class FlxVideo extends Video
 			{
 				final absolutePath:String = FileSystem.absolutePath(location);
 
-				if (Assets.exists(location))
-					return super.load(FileSystem.absolutePath(Assets.getPath(location)), options);
-				else if (FileSystem.exists(absolutePath))
+				if (FileSystem.exists(absolutePath))
 					return super.load(absolutePath, options);
+				else if (Assets.exists(location))
+				{
+					final assetPath:String = Assets.getPath(location);
+
+					if (assetPath != null)
+					{
+						if (FileSystem.exists(assetPath) && Path.isAbsolute(assetPath))
+							return super.load(assetPath, options);
+						else if (!Path.isAbsolute(assetPath))
+						{
+							try
+							{
+								final assetBytes:Bytes = Assets.getBytes(location);
+
+								if (assetBytes != null)
+									return super.load(assetBytes, options);
+							}
+							catch (e:Dynamic)
+							{
+								FlxG.log.error('Error loading asset bytes from location "$location": $e');
+
+								return false;
+							}
+						}
+					}
+
+					return false;
+				}
 				else
 				{
 					FlxG.log.warn('Unable to find the video file at location "$location".');
@@ -137,7 +180,7 @@ class FlxVideo extends Video
 
 		#if FLX_SOUND_SYSTEM
 		if (autoVolumeHandle)
-			volume = Math.floor((FlxG.sound.muted ? 0 : 1) * FlxG.sound.volume * Define.getFloat('HXVLC_FLIXEL_VOLUME_MULTIPLIER', 100));
+			volume = Math.floor(FlxMath.bound(getCalculatedVolume(), 0, 1) * Define.getFloat('HXVLC_FLIXEL_VOLUME_MULTIPLIER', 100));
 		#end
 
 		super.update(deltaTime);
